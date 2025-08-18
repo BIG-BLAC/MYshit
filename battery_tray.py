@@ -15,7 +15,7 @@ import os
 def read_voltage(bus):
     """Reads the battery voltage from the I2C bus."""
     try:
-        address = 0x36
+        address = 0x41
         read = bus.read_word_data(address, 2)
         swapped = struct.unpack("<H", struct.pack(">H", read))[0]
         voltage = swapped * 1.25 / 1000 / 16
@@ -28,7 +28,7 @@ def read_voltage(bus):
 def read_capacity(bus):
     """Reads the battery capacity from the I2C bus."""
     try:
-        address = 0x36
+        address = 0x41
         read = bus.read_word_data(address, 4)
         swapped = struct.unpack("<H", struct.pack(">H", read))[0]
         capacity = swapped / 256
