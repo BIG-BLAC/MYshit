@@ -64,7 +64,7 @@ apt-get install -y python3-gi gir1.2-gtk-3.0 python3-smbus2 python3-pil python3-
 echo "System packages installed."
 
 echo ">>> Step 5: Installing Python libraries for INA219 sensor..."
-pip3 install adafruit-circuitpython-ina219
+pip3 install adafruit-blinka adafruit-circuitpython-ina219
 echo "Python libraries installed."
 
 # 6. Install the application files
