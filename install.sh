@@ -60,7 +60,7 @@ fi
 # 5. Install required packages
 echo ">>> Step 4: Installing required packages (GTK, SMBus)..."
 apt-get update > /dev/null
-apt-get install -y python3-gi gir1.2-gtk-3.0 python3-smbus2
+apt-get install -y python3-gi gir1.2-gtk-3.0 python3-smbus2 python3-ayatana-appindicator
 echo "Packages installed."
 
 # 6. Install the application files

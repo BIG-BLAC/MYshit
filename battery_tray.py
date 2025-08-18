@@ -2,7 +2,8 @@
 
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib, GdkPixbuf
+gi.require_version('AppIndicator3', '0.1')
+from gi.repository import Gtk, GLib, AppIndicator3
 
 import struct
 import smbus2
@@ -21,7 +22,6 @@ def read_voltage(bus):
         voltage = swapped * 1.25 / 1000 / 16
         return voltage
     except Exception as e:
-        # This will catch errors like the device not being found
         print(f"Error reading voltage: {e}")
         return None
 
@@ -32,46 +32,56 @@ def read_capacity(bus):
         read = bus.read_word_data(address, 4)
         swapped = struct.unpack("<H", struct.pack(">H", read))[0]
         capacity = swapped / 256
-        return min(100.0, capacity) # Ensure capacity doesn't exceed 100%
+        return min(100.0, capacity)
     except Exception as e:
         print(f"Error reading capacity: {e}")
         return None
 
-# --- GTK Tray Application ---
+# --- AppIndicator Application ---
 
 class BatteryTrayApp:
     def __init__(self):
         # Initialize the smbus for I2C communication.
-        # This is done once to avoid re-opening the bus every time.
         try:
             self.bus = smbus2.SMBus(1)
         except FileNotFoundError:
-            # This error is critical and means I2C is likely not enabled
             self.bus = None
 
-        # Create the status icon itself.
-        self.status_icon = Gtk.StatusIcon()
-        self.status_icon.set_visible(True)
-        self.status_icon.connect("popup-menu", self.on_popup_menu)
+        # Create the AppIndicator instance.
+        self.indicator = AppIndicator3.Indicator.new(
+            "kali-ups-indicator",
+            "battery-missing-symbolic",
+            AppIndicator3.IndicatorCategory.HARDWARE
+        )
+        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
 
-        # Start the main update loop.
-        # GLib.timeout_add_seconds is the GTK-friendly way to do background tasks.
-        # It will call self.update_status every 30 seconds.
-        GLib.timeout_add_seconds(30, self.update_status)
-        # Call it once immediately to set the initial state
+        # AppIndicators require a menu.
+        self.indicator.set_menu(self._create_menu())
+
+        # Start the update loop.
         self.update_status()
+        GLib.timeout_add_seconds(30, self.update_status)
+
+    def _create_menu(self):
+        """Creates a simple GTK menu with a 'Quit' item."""
+        menu = Gtk.Menu()
+        # This item will show the detailed status on hover.
+        self.status_menu_item = Gtk.MenuItem(label="Status: Initializing...")
+        self.status_menu_item.set_sensitive(False) # Make it not clickable
+        menu.append(self.status_menu_item)
+
+        menu.append(Gtk.SeparatorMenuItem())
+
+        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item.connect("activate", self._quit)
+        menu.append(quit_item)
+
+        menu.show_all()
+        return menu
 
     def get_icon_name(self, capacity, voltage):
         """Determines which icon to show based on the battery level."""
-        # The icon names follow the standard Freedesktop icon theme specification.
-        # This makes them likely to work on any standard Linux desktop.
-        # The '-symbolic' suffix is used for modern, monochrome tray icons.
-
-        # A voltage > 4.2 suggests it's charging (or fully charged and plugged in)
         is_charging = voltage > 4.2
-
-        if capacity is None:
-            return "dialog-error-symbolic" # Error icon
 
         if capacity >= 95:
             return "battery-full-charged-symbolic" if is_charging else "battery-full-symbolic"
@@ -87,36 +97,31 @@ class BatteryTrayApp:
     def update_status(self):
         """The main update function, called periodically."""
         if self.bus is None:
-            self.status_icon.set_from_icon_name("dialog-error-symbolic")
-            self.status_icon.set_tooltip_text("Battery Monitor Error\nI2C bus not found. Is it enabled in raspi-config?")
-            return True # Keep the timer running
+            self.indicator.set_icon_full("dialog-error-symbolic", "Error")
+            self.indicator.set_label("ERR", "")
+            self.status_menu_item.set_label("Error: I2C bus not found.")
+            return True
 
         voltage = read_voltage(self.bus)
         capacity = read_capacity(self.bus)
 
         if voltage is None or capacity is None:
-            icon_name = "dialog-error-symbolic"
-            tooltip = "Battery Monitor Error\nFailed to read from UPS. Check connection."
+            self.indicator.set_icon_full("dialog-error-symbolic", "Error")
+            self.indicator.set_label("ERR", "")
+            self.status_menu_item.set_label("Error: Failed to read from UPS.")
         else:
             icon_name = self.get_icon_name(capacity, voltage)
-            tooltip = f"Battery: {int(capacity)}%\nVoltage: {voltage:.2f}V"
+            label = f"{int(capacity)} %"
+            self.indicator.set_icon_full(icon_name, "Battery Status")
+            self.indicator.set_label(label, "")
+            self.status_menu_item.set_label(f"Voltage: {voltage:.2f}V")
 
-        self.status_icon.set_from_icon_name(icon_name)
-        self.status_icon.set_tooltip_text(tooltip)
+        return True # Keep the timer running
 
-        # This 'True' is important! It tells GLib to keep running this timer.
-        return True
-
-    def on_popup_menu(self, icon, button, time):
-        """Creates a right-click menu with a 'Quit' option."""
-        menu = Gtk.Menu()
-        quit_item = Gtk.MenuItem(label="Quit")
-        quit_item.connect("activate", Gtk.main_quit)
-        menu.append(quit_item)
-        menu.show_all()
-        menu.popup(None, None, None, None, button, time)
+    def _quit(self, source):
+        """Quit the application."""
+        Gtk.main_quit()
 
 if __name__ == "__main__":
     app = BatteryTrayApp()
-    # This starts the GTK event loop, which waits for user input and runs timers.
     Gtk.main()
