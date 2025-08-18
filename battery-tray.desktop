@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Battery Tray Icon
+Comment=Displays Pi UPS battery status in the system tray
+Exec=/usr/local/bin/battery_tray.py
+Icon=battery-full-symbolic
+Terminal=false
+Categories=Utility;System;
+X-GNOME-Autostart-enabled=true
