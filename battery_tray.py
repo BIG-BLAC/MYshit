@@ -2,125 +2,126 @@
 
 import gi
 gi.require_version('Gtk', '3.0')
-gi.require_version('AppIndicator3', '0.1')
-from gi.repository import Gtk, GLib, AppIndicator3
+from gi.repository import Gtk, GLib
 
+from PIL import Image, ImageDraw, ImageFont
 import struct
 import smbus2
-import time
 import os
+import atexit
+
+# --- Constants ---
+ICON_WIDTH = 64
+ICON_HEIGHT = 24
+# Use a path in the user's cache directory for better practice
+CACHE_DIR = os.path.expanduser("~/.cache/pi-battery-indicator")
+os.makedirs(CACHE_DIR, exist_ok=True)
+ICON_PATH = os.path.join(CACHE_DIR, "battery-icon.png")
 
 # --- I2C Communication Functions ---
-# These functions are responsible for talking to the UPS hardware.
-
 def read_voltage(bus):
-    """Reads the battery voltage from the I2C bus."""
     try:
         address = 0x41
         read = bus.read_word_data(address, 2)
         swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-        voltage = swapped * 1.25 / 1000 / 16
-        return voltage
-    except Exception as e:
-        print(f"Error reading voltage: {e}")
+        return swapped * 1.25 / 1000 / 16
+    except Exception:
         return None
 
 def read_capacity(bus):
-    """Reads the battery capacity from the I2C bus."""
     try:
         address = 0x41
         read = bus.read_word_data(address, 4)
         swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-        capacity = swapped / 256
-        return min(100.0, capacity)
-    except Exception as e:
-        print(f"Error reading capacity: {e}")
+        return min(100.0, swapped / 256)
+    except Exception:
         return None
 
-# --- AppIndicator Application ---
+# --- Icon Generation ---
+def find_font():
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-R.ttf",
+        "/usr/share/fonts/droid/DroidSans.ttf",
+    ]
+    for path in font_paths:
+        if os.path.exists(path):
+            return ImageFont.truetype(path, 14)
+    return ImageFont.load_default()
 
+FONT = find_font()
+
+def generate_icon(capacity, voltage):
+    img = Image.new('RGBA', (ICON_WIDTH, ICON_HEIGHT), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    WHITE = (255, 255, 255, 220)
+
+    is_charging = voltage is not None and voltage > 4.2
+
+    # Battery Outline
+    batt_x, batt_y, batt_w, batt_h = 1, 4, 20, 16
+    draw.rectangle((batt_x, batt_y, batt_x + batt_w, batt_y + batt_h), outline=WHITE, width=1)
+    draw.rectangle((batt_x + batt_w + 1, batt_y + 4, batt_x + batt_w + 3, batt_y + batt_h - 4), fill=WHITE)
+
+    # Battery Fill
+    if capacity is not None:
+        fill_w = int((batt_w - 2) * (capacity / 100.0))
+        fill_color = (255, 50, 50) if capacity <= 15 else (255, 165, 0) if capacity <= 40 else (50, 205, 50)
+        if fill_w > 0:
+            draw.rectangle((batt_x + 2, batt_y + 2, batt_x + fill_w, batt_y + batt_h - 2), fill=fill_color)
+
+    # Charging Symbol
+    if is_charging:
+        bolt = [(batt_x + 11, batt_y + 2), (batt_x + 7, batt_y + 9), (batt_x + 10, batt_y + 9),
+                (batt_x + 6, batt_y + 14), (batt_x + 10, batt_y + 7), (batt_x + 13, batt_y + 7)]
+        draw.polygon(bolt, fill=(255, 255, 0))
+
+    # Text
+    text = f"{int(capacity)}%" if capacity is not None else "ERR"
+    draw.text((batt_x + batt_w + 8, 4), text, font=FONT, fill=WHITE)
+
+    img.save(ICON_PATH, 'PNG')
+
+# --- GTK Application ---
 class BatteryTrayApp:
     def __init__(self):
-        # Initialize the smbus for I2C communication.
         try:
             self.bus = smbus2.SMBus(1)
         except FileNotFoundError:
             self.bus = None
 
-        # Create the AppIndicator instance.
-        self.indicator = AppIndicator3.Indicator.new(
-            "kali-ups-indicator",
-            "battery-missing-symbolic",
-            AppIndicator3.IndicatorCategory.HARDWARE
-        )
-        self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        self.status_icon = Gtk.StatusIcon()
+        self.status_icon.connect("popup-menu", self._create_menu)
+        atexit.register(lambda: os.remove(ICON_PATH) if os.path.exists(ICON_PATH) else None)
 
-        # AppIndicators require a menu.
-        self.indicator.set_menu(self._create_menu())
-
-        # Start the update loop.
         self.update_status()
         GLib.timeout_add_seconds(30, self.update_status)
 
-    def _create_menu(self):
-        """Creates a simple GTK menu with a 'Quit' item."""
-        menu = Gtk.Menu()
-        # This item will show the detailed status on hover.
-        self.status_menu_item = Gtk.MenuItem(label="Status: Initializing...")
-        self.status_menu_item.set_sensitive(False) # Make it not clickable
-        menu.append(self.status_menu_item)
-
-        menu.append(Gtk.SeparatorMenuItem())
-
-        quit_item = Gtk.MenuItem(label="Quit")
-        quit_item.connect("activate", self._quit)
-        menu.append(quit_item)
-
-        menu.show_all()
-        return menu
-
-    def get_icon_name(self, capacity, voltage):
-        """Determines which icon to show based on the battery level."""
-        is_charging = voltage > 4.2
-
-        if capacity >= 95:
-            return "battery-full-charged-symbolic" if is_charging else "battery-full-symbolic"
-        elif capacity >= 75:
-            return "battery-good-charging-symbolic" if is_charging else "battery-good-symbolic"
-        elif capacity >= 40:
-            return "battery-medium-charging-symbolic" if is_charging else "battery-medium-symbolic"
-        elif capacity >= 15:
-            return "battery-low-charging-symbolic" if is_charging else "battery-low-symbolic"
-        else:
-            return "battery-caution-charging-symbolic" if is_charging else "battery-caution-symbolic"
-
     def update_status(self):
-        """The main update function, called periodically."""
-        if self.bus is None:
-            self.indicator.set_icon_full("dialog-error-symbolic", "Error")
-            self.indicator.set_label("ERR", "")
-            self.status_menu_item.set_label("Error: I2C bus not found.")
-            return True
+        voltage = read_voltage(self.bus) if self.bus else None
+        capacity = read_capacity(self.bus) if self.bus else None
 
-        voltage = read_voltage(self.bus)
-        capacity = read_capacity(self.bus)
+        generate_icon(capacity, voltage)
+        self.status_icon.set_from_file(ICON_PATH)
 
-        if voltage is None or capacity is None:
-            self.indicator.set_icon_full("dialog-error-symbolic", "Error")
-            self.indicator.set_label("ERR", "")
-            self.status_menu_item.set_label("Error: Failed to read from UPS.")
+        if capacity is None:
+            tooltip = "Error: Could not read from UPS."
         else:
-            icon_name = self.get_icon_name(capacity, voltage)
-            label = f"{int(capacity)} %"
-            self.indicator.set_icon_full(icon_name, "Battery Status")
-            self.indicator.set_label(label, "")
-            self.status_menu_item.set_label(f"Voltage: {voltage:.2f}V")
+            state = "Charging" if voltage > 4.2 else "Discharging"
+            tooltip = f"Battery: {int(capacity)}% ({state})\nVoltage: {voltage:.2f}V"
+        self.status_icon.set_tooltip_text(tooltip)
 
-        return True # Keep the timer running
+        return True
 
-    def _quit(self, source):
-        """Quit the application."""
-        Gtk.main_quit()
+    def _create_menu(self, icon, button, time):
+        menu = Gtk.Menu()
+        quit_item = Gtk.MenuItem(label="Quit")
+        quit_item.connect("activate", Gtk.main_quit)
+        menu.append(quit_item)
+        menu.show_all()
+        menu.popup(None, None, None, None, button, time)
 
 if __name__ == "__main__":
     app = BatteryTrayApp()
