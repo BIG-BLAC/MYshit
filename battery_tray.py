@@ -5,37 +5,31 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, GLib
 
 from PIL import Image, ImageDraw, ImageFont
-import struct
-import smbus2
 import os
 import atexit
+import board
+import busio
+import adafruit_ina219
 
 # --- Constants ---
-ICON_WIDTH = 64
-ICON_HEIGHT = 24
-# Use a path in the user's cache directory for better practice
+ICON_WIDTH = 80
+ICON_HEIGHT = 32
 CACHE_DIR = os.path.expanduser("~/.cache/pi-battery-indicator")
 os.makedirs(CACHE_DIR, exist_ok=True)
 ICON_PATH = os.path.join(CACHE_DIR, "battery-icon.png")
 
-# --- I2C Communication Functions ---
-def read_voltage(bus):
-    try:
-        address = 0x41
-        read = bus.read_word_data(address, 2)
-        swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-        return swapped * 1.25 / 1000 / 16
-    except Exception:
-        return None
+# --- Battery Logic ---
+def voltage_to_percent(voltage):
+    """Converts a 3S battery voltage to a percentage."""
+    MIN_VOLT = 9.0  # 3.0V per cell
+    MAX_VOLT = 12.6 # 4.2V per cell
 
-def read_capacity(bus):
-    try:
-        address = 0x41
-        read = bus.read_word_data(address, 4)
-        swapped = struct.unpack("<H", struct.pack(">H", read))[0]
-        return min(100.0, swapped / 256)
-    except Exception:
-        return None
+    # Clamp the voltage to the valid range
+    voltage = max(MIN_VOLT, min(MAX_VOLT, voltage))
+
+    # Calculate the percentage
+    percent = ((voltage - MIN_VOLT) / (MAX_VOLT - MIN_VOLT)) * 100
+    return percent
 
 # --- Icon Generation ---
 def find_font():
@@ -47,50 +41,53 @@ def find_font():
     ]
     for path in font_paths:
         if os.path.exists(path):
-            return ImageFont.truetype(path, 14)
+            return ImageFont.truetype(path, 22)
     return ImageFont.load_default()
 
 FONT = find_font()
 
-def generate_icon(capacity, voltage):
+def generate_icon(capacity, voltage, current):
     img = Image.new('RGBA', (ICON_WIDTH, ICON_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
     WHITE = (255, 255, 255, 220)
 
-    is_charging = voltage is not None and voltage > 4.2
+    # A positive current means the battery is discharging
+    is_discharging = current is not None and current > 0
 
     # Battery Outline
-    batt_x, batt_y, batt_w, batt_h = 1, 4, 20, 16
-    draw.rectangle((batt_x, batt_y, batt_x + batt_w, batt_y + batt_h), outline=WHITE, width=1)
-    draw.rectangle((batt_x + batt_w + 1, batt_y + 4, batt_x + batt_w + 3, batt_y + batt_h - 4), fill=WHITE)
+    batt_x, batt_y, batt_w, batt_h = 2, 5, 28, 22
+    draw.rectangle((batt_x, batt_y, batt_x + batt_w, batt_y + batt_h), outline=WHITE, width=2)
+    draw.rectangle((batt_x + batt_w + 1, batt_y + 6, batt_x + batt_w + 4, batt_y + batt_h - 6), fill=WHITE)
 
     # Battery Fill
     if capacity is not None:
-        fill_w = int((batt_w - 2) * (capacity / 100.0))
+        fill_w = int((batt_w - 4) * (capacity / 100.0))
         fill_color = (255, 50, 50) if capacity <= 15 else (255, 165, 0) if capacity <= 40 else (50, 205, 50)
         if fill_w > 0:
-            draw.rectangle((batt_x + 2, batt_y + 2, batt_x + fill_w, batt_y + batt_h - 2), fill=fill_color)
+            draw.rectangle((batt_x + 3, batt_y + 3, batt_x + 1 + fill_w, batt_y + batt_h - 3), fill=fill_color)
 
-    # Charging Symbol
-    if is_charging:
-        bolt = [(batt_x + 11, batt_y + 2), (batt_x + 7, batt_y + 9), (batt_x + 10, batt_y + 9),
-                (batt_x + 6, batt_y + 14), (batt_x + 10, batt_y + 7), (batt_x + 13, batt_y + 7)]
+    # Charging Symbol (now based on current)
+    if not is_discharging:
+        bolt = [(batt_x + 15, batt_y + 4), (batt_x + 10, batt_y + 13), (batt_x + 14, batt_y + 13),
+                (batt_x + 9, batt_y + 20), (batt_x + 13, batt_y + 11), (batt_x + 17, batt_y + 11)]
         draw.polygon(bolt, fill=(255, 255, 0))
 
     # Text
     text = f"{int(capacity)}%" if capacity is not None else "ERR"
-    draw.text((batt_x + batt_w + 8, 4), text, font=FONT, fill=WHITE)
+    draw.text((batt_x + batt_w + 10, 4), text, font=FONT, fill=WHITE)
 
     img.save(ICON_PATH, 'PNG')
 
 # --- GTK Application ---
 class BatteryTrayApp:
     def __init__(self):
+        self.sensor = None
         try:
-            self.bus = smbus2.SMBus(1)
-        except FileNotFoundError:
-            self.bus = None
+            i2c = busio.I2C(board.SCL, board.SDA)
+            self.sensor = adafruit_ina219.INA219(i2c, 0x41)
+        except Exception as e:
+            print(f"Error initializing INA219: {e}")
 
         self.status_icon = Gtk.StatusIcon()
         self.status_icon.connect("popup-menu", self._create_menu)
@@ -100,18 +97,28 @@ class BatteryTrayApp:
         GLib.timeout_add_seconds(30, self.update_status)
 
     def update_status(self):
-        voltage = read_voltage(self.bus) if self.bus else None
-        capacity = read_capacity(self.bus) if self.bus else None
+        if not self.sensor:
+            generate_icon(None, None, None)
+            self.status_icon.set_from_file(ICON_PATH)
+            self.status_icon.set_tooltip_text("Error: INA219 sensor not found.")
+            return True
 
-        generate_icon(capacity, voltage)
-        self.status_icon.set_from_file(ICON_PATH)
+        try:
+            voltage = self.sensor.bus_voltage
+            current = self.sensor.current  # in mA
+            capacity = voltage_to_percent(voltage)
 
-        if capacity is None:
-            tooltip = "Error: Could not read from UPS."
-        else:
-            state = "Charging" if voltage > 4.2 else "Discharging"
-            tooltip = f"Battery: {int(capacity)}% ({state})\nVoltage: {voltage:.2f}V"
-        self.status_icon.set_tooltip_text(tooltip)
+            generate_icon(capacity, voltage, current)
+            self.status_icon.set_from_file(ICON_PATH)
+
+            state = "Discharging" if current > 0 else "Charging"
+            tooltip = f"Battery: {int(capacity)}% ({state})\nVoltage: {voltage:.2f}V\nCurrent: {current:.0f}mA"
+            self.status_icon.set_tooltip_text(tooltip)
+        except Exception as e:
+            print(f"Error reading from sensor: {e}")
+            generate_icon(None, None, None)
+            self.status_icon.set_from_file(ICON_PATH)
+            self.status_icon.set_tooltip_text("Error: Could not read from sensor.")
 
         return True
 

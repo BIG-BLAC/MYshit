@@ -58,13 +58,17 @@ else
 fi
 
 # 5. Install required packages
-echo ">>> Step 4: Installing required packages (GTK, SMBus)..."
+echo ">>> Step 4: Installing required system packages..."
 apt-get update > /dev/null
-apt-get install -y python3-gi gir1.2-gtk-3.0 python3-smbus2 python3-pil
-echo "Packages installed."
+apt-get install -y python3-gi gir1.2-gtk-3.0 python3-smbus2 python3-pil python3-pip
+echo "System packages installed."
+
+echo ">>> Step 5: Installing Python libraries for INA219 sensor..."
+pip3 install adafruit-circuitpython-ina219
+echo "Python libraries installed."
 
 # 6. Install the application files
-echo ">>> Step 5: Installing application files..."
+echo ">>> Step 6: Installing application files..."
 
 # Check if files exist
 if [ ! -f "battery_tray.py" ] || [ ! -f "battery-tray.desktop" ]; then
