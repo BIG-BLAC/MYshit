@@ -46,22 +46,22 @@ def generate_battery_icon(capacity, is_charging):
     draw = ImageDraw.Draw(img)
     WHITE = (255, 255, 255, 220)
 
-    # Battery Outline
-    batt_x, batt_y, batt_w, batt_h = 4, 5, 22, 22
+    # Horizontal Battery Outline
+    batt_x, batt_y, batt_w, batt_h = 2, 8, 24, 16
     draw.rectangle((batt_x, batt_y, batt_x + batt_w, batt_y + batt_h), outline=WHITE, width=2)
-    draw.rectangle((batt_x + batt_w + 1, batt_y + 6, batt_x + batt_w + 4, batt_y + batt_h - 6), fill=WHITE)
+    draw.rectangle((batt_x + batt_w + 1, batt_y + 4, batt_x + batt_w + 3, batt_y + batt_h - 4), fill=WHITE)
 
-    # Battery Fill
+    # Horizontal Battery Fill (left to right)
     if capacity is not None:
-        fill_h = int((batt_h - 4) * (capacity / 100.0))
+        fill_w = int((batt_w - 4) * (capacity / 100.0))
         fill_color = (255, 50, 50) if capacity <= 15 else (255, 165, 0) if capacity <= 40 else (50, 205, 50)
-        if fill_h > 0:
-            draw.rectangle((batt_x + 3, batt_y + batt_h - 3 - fill_h, batt_x + batt_w - 3, batt_y + batt_h - 3), fill=fill_color)
+        if fill_w > 0:
+            draw.rectangle((batt_x + 3, batt_y + 3, batt_x + 3 + fill_w, batt_y + batt_h - 3), fill=fill_color)
 
-    # Charging Symbol (with corrected logic)
+    # Charging Symbol
     if is_charging:
-        bolt = [(17, 9), (12, 18), (16, 18), (11, 25), (15, 16), (19, 16)]
-        draw.polygon(bolt, fill=(50, 255, 50)) # Green charging bolt
+        bolt = [(15, 11), (11, 16), (14, 16), (10, 21), (13, 17), (16, 17)]
+        draw.polygon(bolt, fill=(50, 255, 50))
 
     img.save(ICON_BATT_PATH, 'PNG')
 
@@ -79,7 +79,8 @@ def generate_text_icon(capacity):
         text_width, _ = FONT.getsize(text)
 
     x = (32 - text_width) / 2
-    y = 4  # Keep vertical alignment simple
+    # Keep vertical alignment simple and compatible
+    y = 4
 
     draw.text((x, y), text, font=FONT, fill=WHITE)
 
