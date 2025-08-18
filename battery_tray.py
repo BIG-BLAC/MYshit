@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'li
 from INA219 import INA219
 
 # --- Constants ---
-ICON_WIDTH = 80
+ICON_WIDTH = 96
 ICON_HEIGHT = 32
 CACHE_DIR = os.path.expanduser("~/.cache/pi-battery-indicator")
 os.makedirs(CACHE_DIR, exist_ok=True)
@@ -43,7 +43,8 @@ def generate_icon(capacity, voltage, current):
 
     WHITE = (255, 255, 255, 220)
 
-    is_discharging = current is not None and current > 0
+    # Logic based on user feedback: negative current means charging
+    is_charging = current is not None and current < -10  # Use a -10mA threshold
 
     # Battery Outline
     batt_x, batt_y, batt_w, batt_h = 2, 5, 28, 22
@@ -58,14 +59,14 @@ def generate_icon(capacity, voltage, current):
             draw.rectangle((batt_x + 3, batt_y + 3, batt_x + 1 + fill_w, batt_y + batt_h - 3), fill=fill_color)
 
     # Charging Symbol
-    if not is_discharging:
+    if is_charging:
         bolt = [(batt_x + 15, batt_y + 4), (batt_x + 10, batt_y + 13), (batt_x + 14, batt_y + 13),
                 (batt_x + 9, batt_y + 20), (batt_x + 13, batt_y + 11), (batt_x + 17, batt_y + 11)]
         draw.polygon(bolt, fill=(255, 255, 0))
 
-    # Text
+    # Text (with more space)
     text = f"{int(capacity)}%" if capacity is not None else "ERR"
-    draw.text((batt_x + batt_w + 10, 4), text, font=FONT, fill=WHITE)
+    draw.text((batt_x + batt_w + 12, 4), text, font=FONT, fill=WHITE)
 
     img.save(ICON_PATH, 'PNG')
 
@@ -105,7 +106,8 @@ class BatteryTrayApp:
             generate_icon(capacity, voltage, current)
             self.status_icon.set_from_file(ICON_PATH)
 
-            state = "Discharging" if current > 0 else "Charging"
+            # Corrected state logic based on user feedback
+            state = "Charging" if current is not None and current < -10 else "Discharging"
             tooltip = f"Battery: {int(capacity)}% ({state})\nVoltage: {voltage:.2f}V\nCurrent: {current:.0f}mA"
             self.status_icon.set_tooltip_text(tooltip)
         except Exception as e:
