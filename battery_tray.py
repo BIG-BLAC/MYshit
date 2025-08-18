@@ -6,10 +6,14 @@ from gi.repository import Gtk, GLib
 
 from PIL import Image, ImageDraw, ImageFont
 import os
+import sys
 import atexit
-import board
-import busio
-import adafruit_ina219
+
+# This is the key to making the application self-contained.
+# It adds the local 'lib' directory to the Python path.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'lib'))
+
+from INA219 import INA219
 
 # --- Constants ---
 ICON_WIDTH = 80
@@ -17,19 +21,6 @@ ICON_HEIGHT = 32
 CACHE_DIR = os.path.expanduser("~/.cache/pi-battery-indicator")
 os.makedirs(CACHE_DIR, exist_ok=True)
 ICON_PATH = os.path.join(CACHE_DIR, "battery-icon.png")
-
-# --- Battery Logic ---
-def voltage_to_percent(voltage):
-    """Converts a 3S battery voltage to a percentage."""
-    MIN_VOLT = 9.0  # 3.0V per cell
-    MAX_VOLT = 12.6 # 4.2V per cell
-
-    # Clamp the voltage to the valid range
-    voltage = max(MIN_VOLT, min(MAX_VOLT, voltage))
-
-    # Calculate the percentage
-    percent = ((voltage - MIN_VOLT) / (MAX_VOLT - MIN_VOLT)) * 100
-    return percent
 
 # --- Icon Generation ---
 def find_font():
@@ -52,7 +43,6 @@ def generate_icon(capacity, voltage, current):
 
     WHITE = (255, 255, 255, 220)
 
-    # A positive current means the battery is discharging
     is_discharging = current is not None and current > 0
 
     # Battery Outline
@@ -67,7 +57,7 @@ def generate_icon(capacity, voltage, current):
         if fill_w > 0:
             draw.rectangle((batt_x + 3, batt_y + 3, batt_x + 1 + fill_w, batt_y + batt_h - 3), fill=fill_color)
 
-    # Charging Symbol (now based on current)
+    # Charging Symbol
     if not is_discharging:
         bolt = [(batt_x + 15, batt_y + 4), (batt_x + 10, batt_y + 13), (batt_x + 14, batt_y + 13),
                 (batt_x + 9, batt_y + 20), (batt_x + 13, batt_y + 11), (batt_x + 17, batt_y + 11)]
@@ -84,10 +74,10 @@ class BatteryTrayApp:
     def __init__(self):
         self.sensor = None
         try:
-            i2c = busio.I2C(board.SCL, board.SDA)
-            self.sensor = adafruit_ina219.INA219(i2c, 0x41)
+            # Initialize with the correct I2C address
+            self.sensor = INA219(addr=0x41)
         except Exception as e:
-            print(f"Error initializing INA219: {e}")
+            print(f"Error initializing INA219 from local lib: {e}")
 
         self.status_icon = Gtk.StatusIcon()
         self.status_icon.connect("popup-menu", self._create_menu)
@@ -104,9 +94,13 @@ class BatteryTrayApp:
             return True
 
         try:
-            voltage = self.sensor.bus_voltage
-            current = self.sensor.current  # in mA
-            capacity = voltage_to_percent(voltage)
+            voltage = self.sensor.getBusVoltage_V()
+            current = self.sensor.getCurrent_mA()
+
+            # Use the exact calculation from the user's demo script
+            capacity = (voltage - 9) / 3.6 * 100
+            if capacity > 100: capacity = 100
+            if capacity < 0: capacity = 0
 
             generate_icon(capacity, voltage, current)
             self.status_icon.set_from_file(ICON_PATH)
