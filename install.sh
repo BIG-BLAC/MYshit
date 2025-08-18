@@ -63,9 +63,11 @@ apt-get update > /dev/null
 apt-get install -y python3-gi gir1.2-gtk-3.0 python3-smbus2 python3-pil python3-pip
 echo "System packages installed."
 
-echo ">>> Step 5: Installing Python libraries for INA219 sensor..."
-pip3 install adafruit-blinka adafruit-circuitpython-ina219
-echo "Python libraries installed."
+echo ">>> Step 5: Force-reinstalling Python libraries for a clean slate..."
+pip3 install --upgrade pip
+pip3 uninstall -y adafruit-blinka adafruit-circuitpython-ina219 adafruit-pureio adafruit-circuitpython-busdevice adafruit-circuitpython-register
+pip3 install --force-reinstall adafruit-blinka adafruit-circuitpython-ina219
+echo "Python libraries reinstalled."
 
 # 6. Install the application files
 echo ">>> Step 6: Installing application files..."
