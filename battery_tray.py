@@ -36,7 +36,7 @@ def find_font():
     for path in font_paths:
         if os.path.exists(path):
             # Using a slightly smaller, bold font for clarity
-            return ImageFont.truetype(path.replace("Regular", "Bold"), 20,_fallback_not_found=True)
+            return ImageFont.truetype(path.replace("Regular", "Bold"), 20)
     return ImageFont.load_default()
 
 FONT = find_font()
@@ -66,12 +66,22 @@ def generate_battery_icon(capacity, is_charging):
     img.save(ICON_BATT_PATH, 'PNG')
 
 def generate_text_icon(capacity):
-    img = Image.new('RGBA', (80, 32), (0, 0, 0, 0)) # Wider icon for text
+    img = Image.new('RGBA', (32, 32), (0, 0, 0, 0)) # Square icon
     draw = ImageDraw.Draw(img)
     WHITE = (255, 255, 255, 220)
 
-    text = f"{int(capacity)}%" if capacity is not None else "ERR"
-    draw.text((2, 4), text, font=FONT, fill=WHITE)
+    text = f"{int(capacity)}%" if capacity is not None else "!"
+
+    # Use a compatible method to get text size and center it
+    try:
+        text_width = draw.textlength(text, font=FONT)
+    except AttributeError:  # Fallback for older Pillow versions
+        text_width, _ = FONT.getsize(text)
+
+    x = (32 - text_width) / 2
+    y = 4  # Keep vertical alignment simple
+
+    draw.text((x, y), text, font=FONT, fill=WHITE)
 
     img.save(ICON_TEXT_PATH, 'PNG')
 
