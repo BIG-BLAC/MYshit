@@ -1,0 +1,13 @@
+[Unit]
+Description=Battery Notifier Service
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/battery_notifier.py
+User=root
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
