@@ -36,7 +36,7 @@ def find_font():
     for path in font_paths:
         if os.path.exists(path):
             # Using a smaller font size to prevent cropping
-            return ImageFont.truetype(path.replace("Regular", "Bold"), 16)
+            return ImageFont.truetype(path.replace("Regular", "Bold"), 17)
     return ImageFont.load_default()
 
 FONT = find_font()
@@ -70,7 +70,7 @@ def generate_text_icon(capacity):
     draw = ImageDraw.Draw(img)
     WHITE = (255, 255, 255, 220)
 
-    text = f"{int(capacity)}%" if capacity is not None else "!"
+    text = f"{int(capacity)}" if capacity is not None else "!"
 
     # Use a compatible method to get text size and center it
     try:
