@@ -36,7 +36,7 @@ def find_font():
     for path in font_paths:
         if os.path.exists(path):
             # Using a smaller font size to prevent cropping
-            return ImageFont.truetype(path.replace("Regular", "Bold"), 17)
+            return ImageFont.truetype(path.replace("Regular", "Bold"), 19)
     return ImageFont.load_default()
 
 FONT = find_font()
